@@ -81,6 +81,10 @@ func (h *httpSessionH3) isClosed() bool {
 
 func (h *httpSessionH3) Close() error {
 	if h.connClosed.CompareAndSwap(false, true) {
+		if h.agent != nil && h.client.legitAgentGenerator != nil {
+			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
+		}
+
 		if h.rt != nil {
 			h.rt.Close()
 		}

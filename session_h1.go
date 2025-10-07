@@ -34,6 +34,10 @@ func (h *HttpSessionH1) Close() error {
 		if h.Conn == nil {
 			return nil
 		}
+		if h.agent != nil && h.client.legitAgentGenerator != nil {
+			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
+		}
+
 		return h.Conn.Close()
 	}
 	return nil

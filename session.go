@@ -3,6 +3,7 @@ package swifthttp
 import (
 	"context"
 	"fmt"
+	"github.com/refraction-networking/uquic/http3"
 	"io"
 	"net"
 	"net/http"
@@ -23,7 +24,7 @@ type HttpSession interface {
 var (
 	h1TLSProtos   = []string{"http/1.1"}
 	h2TLSProtos   = []string{http2.NextProtoTLS}
-	h3TLSProtos   = []string{http2.NextProtoTLS}
+	h3TLSProtos   = []string{http3.NextProtoH3}
 	spdyTLSProtos = []string{"spdy/3.1"}
 )
 
@@ -71,14 +72,26 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 
 	if hc.httpVersion == HttpVersion3_0 {
 		if !isTLS {
+			if agent != nil && hc.legitAgentGenerator != nil {
+				hc.legitAgentGenerator.ReleaseAgent(agent)
+			}
 			return nil, fmt.Errorf("HTTP/3 requires a TLS connection")
 		}
 		sessionTlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos)
-		return newH3Session(ctx, hc, addr, hostname, agent, sessionTlsConfig)
+		session, err := newH3Session(ctx, hc, addr, hostname, agent, sessionTlsConfig)
+		if err != nil {
+			if agent != nil && hc.legitAgentGenerator != nil {
+				hc.legitAgentGenerator.ReleaseAgent(agent)
+			}
+		}
+		return session, err
 	}
 
 	conn, err := hc.dial(ctx, addr)
 	if err != nil {
+		if agent != nil && hc.legitAgentGenerator != nil {
+			hc.legitAgentGenerator.ReleaseAgent(agent)
+		}
 		return nil, err
 	}
 
@@ -110,12 +123,18 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 		if agent != nil && agent.ClientHelloSpec != nil {
 			if err := uconn.ApplyPreset(agent.ClientHelloSpec); err != nil {
 				uconn.Close()
+				if agent != nil && hc.legitAgentGenerator != nil {
+					hc.legitAgentGenerator.ReleaseAgent(agent)
+				}
 				return nil, fmt.Errorf("failed to apply utls preset: %w", err)
 			}
 		}
 
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			uconn.Close()
+			if agent != nil && hc.legitAgentGenerator != nil {
+				hc.legitAgentGenerator.ReleaseAgent(agent)
+			}
 			return nil, fmt.Errorf("utls handshake failed: %w", err)
 		}
 		conn = uconn
@@ -131,9 +150,14 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 		session, err = newSpdy3Session(hc, conn, hostname, agent)
 	default:
 		conn.Close()
-		return nil, fmt.Errorf("unsupported http version for tcp session: %s", hc.httpVersion)
+		err = fmt.Errorf("unsupported http version for tcp session: %s", hc.httpVersion)
 	}
 
+	if err != nil {
+		if agent != nil && hc.legitAgentGenerator != nil {
+			hc.legitAgentGenerator.ReleaseAgent(agent)
+		}
+	}
 	return session, err
 }
 

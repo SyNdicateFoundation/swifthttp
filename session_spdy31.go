@@ -55,6 +55,9 @@ func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legi
 
 func (s *HttpSessionSpdy31) Close() error {
 	if s.connClosed.CompareAndSwap(false, true) {
+		if s.agent != nil && s.client.legitAgentGenerator != nil {
+			s.client.legitAgentGenerator.ReleaseAgent(s.agent)
+		}
 		s.writeMu.Lock()
 		s.framer.WriteFrame(&spdy.GoAwayFrame{LastGoodStreamId: atomic.LoadUint32(&s.lastStreamID)})
 		s.writeMu.Unlock()

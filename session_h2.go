@@ -100,6 +100,10 @@ func newH2Session(client *Client, conn net.Conn, hostname string, agent *legitag
 
 func (h *HttpSessionH2) Close() error {
 	if h.connClosed.CompareAndSwap(false, true) {
+		if h.agent != nil && h.client.legitAgentGenerator != nil {
+			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
+		}
+
 		h.writeMu.Lock()
 		h.framer.WriteGoAway(atomic.LoadUint32(&h.lastStreamID), http2.ErrCodeNo, nil)
 		h.writeMu.Unlock()
