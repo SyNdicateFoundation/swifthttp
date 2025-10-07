@@ -23,7 +23,7 @@ The library is built to handle millions of fast requests, offering features like
 To add SwiftHTTP to your Go project, run the following command:
 
 ```sh
-go get github.com/SyNdicateFoundation/swifthttp```
+go get github.com/SyNdicateFoundation/swifthttp
 ```
 
 Here's a basic example of how to create a client and make a simple GET request.
