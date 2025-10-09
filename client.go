@@ -1,6 +1,10 @@
 package swifthttp
 
 import (
+	"github.com/SyNdicateFoundation/fastrand"
+	"github.com/valyala/bytebufferpool"
+	"net/http"
+	"sync"
 	"time"
 
 	"github.com/SyNdicateFoundation/legitagent"
@@ -19,6 +23,19 @@ func NewHttpClient(options ...OptionFunc) *Client {
 		httpVersion: HttpVersion1_1,
 		tls: &HttpTLSConfig{
 			TLSMode: HttpTlsModeAutoTLS,
+		},
+		h2StreamPool: sync.Pool{
+			New: func() interface{} {
+				return &h2Stream{
+					header: make(http.Header),
+					body:   bytebufferpool.Get(),
+				}
+			},
+		},
+		hpackEncoderBufPool: sync.Pool{
+			New: func() interface{} {
+				return new(bytebufferpool.ByteBuffer)
+			},
 		},
 	}
 	for _, option := range options {
@@ -122,7 +139,7 @@ func WithVersion(httpVersion HttpVersion) OptionFunc {
 	}
 }
 
-func WithRandomizer(randomizer bool) OptionFunc {
+func WithRandomizer(randomizer fastrand.Engine) OptionFunc {
 	return func(hc *Client) {
 		hc.randomizer = randomizer
 	}
@@ -137,5 +154,21 @@ func WithRandomizedHeaderSort(randomize bool) OptionFunc {
 func WithCache(enable bool) OptionFunc {
 	return func(hc *Client) {
 		hc.enableCache = enable
+	}
+}
+
+func WithoutPooling() OptionFunc {
+	return func(hc *Client) {
+		hc.h2StreamPool = sync.Pool{
+			New: func() any {
+				return &h2Stream{
+					header: make(http.Header),
+					body:   bytebufferpool.Get(),
+				}
+			},
+		}
+		hc.hpackEncoderBufPool = sync.Pool{
+			New: func() any { return new(bytebufferpool.ByteBuffer) },
+		}
 	}
 }

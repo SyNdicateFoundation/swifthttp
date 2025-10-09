@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -72,6 +73,7 @@ func newH3Session(ctx context.Context, client *Client, addr *net.TCPAddr, hostna
 			},
 		},
 	}
+	s.connClosed.Store(false)
 	return s, nil
 }
 
@@ -100,11 +102,16 @@ func (h *httpSessionH3) Fire(ctx context.Context, req *HttpRequest) error {
 		return net.ErrClosed
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
 		resp, err := h.Request(ctx, req)
 		if err != nil {
 			return
 		}
 		if resp != nil && resp.Body != nil {
+			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}()
@@ -121,18 +128,47 @@ func (h *httpSessionH3) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		method = http.MethodGet
 	}
 
-	var body io.Reader
-	if req.Body != nil {
-		body = bytes.NewReader(req.Body)
+	var finalBody []byte
+	if len(req.Body) > 0 {
+		finalBody = req.Body
+		if h.client.randomizer != nil {
+			finalBody = h.client.randomizer.Randomizer(finalBody)
+		}
 	}
 
-	urlStr := fmt.Sprintf("https://%s%s", h.hostname, req.RawPath)
-	stdReq, err := http.NewRequestWithContext(ctx, method, urlStr, body)
+	var bodyReader io.Reader
+	if finalBody != nil {
+		bodyReader = bytes.NewReader(finalBody)
+	}
+
+	path := req.RawPath
+	if path == "" {
+		path = "/"
+	}
+
+	urlStr := fmt.Sprintf("https://%s%s", h.hostname, path)
+	stdReq, err := http.NewRequestWithContext(ctx, method, urlStr, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standard http.Request: %w", err)
 	}
 
-	stdReq.Header = h.buildHeaders(req, false)
+	headers := h.prepareHeaders(req, false)
+	if finalBody != nil {
+		headers.Set("Content-Length", strconv.Itoa(len(finalBody)))
+	}
+
+	if h.client.randomizer != nil {
+		randomizedHeaders := make(http.Header)
+		for key, values := range headers {
+			randomKey := h.client.randomizer.RandomizerString(key)
+			for _, value := range values {
+				randomizedHeaders.Add(randomKey, h.client.randomizer.RandomizerString(value))
+			}
+		}
+		stdReq.Header = randomizedHeaders
+	} else {
+		stdReq.Header = headers
+	}
 
 	resp, err := h.rt.RoundTrip(stdReq)
 	if err != nil {

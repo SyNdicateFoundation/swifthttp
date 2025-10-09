@@ -44,7 +44,6 @@ func WithHeaders(headers http.Header) RequestOpt {
 
 		req.Header = make(http.Header, len(headers))
 		for k, v := range headers {
-
 			newV := make([]string, len(v))
 			copy(newV, v)
 			req.Header[k] = newV

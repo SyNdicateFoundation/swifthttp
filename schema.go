@@ -1,7 +1,9 @@
 package swifthttp
 
 import (
+	"github.com/SyNdicateFoundation/fastrand"
 	"github.com/SyNdicateFoundation/legitagent"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
@@ -57,6 +59,14 @@ type HttpTLSConfig struct {
 	OptimizedConn bool
 }
 
+type dnsCacheEntry struct {
+	ips      []net.IP
+	expiry   time.Time
+	hostname string
+}
+
+const DefaultCacheTTL = 5 * time.Minute
+
 type Client struct {
 	timeout             HttpTimeout
 	proxy               signproxy.Proxy
@@ -64,9 +74,12 @@ type Client struct {
 	tls                 *HttpTLSConfig
 	httpVersion         HttpVersion
 	legitAgentGenerator *legitagent.Generator
-	randomizer          bool
+	randomizer          fastrand.Engine
 	randomizeHeaderSort bool
 	enableCache         bool
+
+	h2StreamPool        sync.Pool
+	hpackEncoderBufPool sync.Pool
 }
 
 type HttpRequest struct {

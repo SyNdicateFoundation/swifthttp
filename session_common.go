@@ -1,13 +1,33 @@
 package swifthttp
 
 import (
-	"net"
-	"net/http"
-	"strconv"
-
 	"github.com/SyNdicateFoundation/fastrand"
 	"github.com/SyNdicateFoundation/legitagent"
+	"github.com/valyala/bytebufferpool"
+	"io"
+	"net"
+	"net/http"
 )
+
+type byteBufferPoolCloser struct {
+	reader io.Reader
+	buffer *bytebufferpool.ByteBuffer
+}
+
+func (b *byteBufferPoolCloser) Read(p []byte) (n int, err error) {
+	if b.reader == nil {
+		return 0, io.EOF
+	}
+	return b.reader.Read(p)
+}
+func (b *byteBufferPoolCloser) Close() error {
+	if b.buffer != nil {
+		bytebufferpool.Put(b.buffer)
+		b.buffer = nil
+		b.reader = nil
+	}
+	return nil
+}
 
 type SessionCommon struct {
 	client   *Client
@@ -34,26 +54,26 @@ func newSessionCommon(client *Client, hostname string, agent *legitagent.Agent) 
 	return sc
 }
 
-func (s *SessionCommon) buildHeaders(req *HttpRequest, isHttp2 bool) http.Header {
-	headers := make(http.Header)
+func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Header {
+	finalHeaders := make(http.Header)
 
 	req.headerMx.RLock()
 	for key, values := range req.Header {
-		headers[key] = values
+		finalHeaders[key] = values
 	}
 	req.headerMx.RUnlock()
 
 	if s.agent != nil && s.agent.Headers != nil {
 		for key, values := range s.agent.Headers {
-			if _, exists := headers[key]; !exists {
-				headers[key] = values
+			if _, exists := finalHeaders[key]; !exists {
+				finalHeaders[key] = values
 			}
 		}
 	}
 
 	method := string(req.Method)
 	if method == "" {
-		method = "GET"
+		method = http.MethodGet
 	}
 
 	path := req.RawPath
@@ -62,30 +82,27 @@ func (s *SessionCommon) buildHeaders(req *HttpRequest, isHttp2 bool) http.Header
 	}
 
 	if isHttp2 {
-		if _, ok := headers[":method"]; !ok {
-			headers.Set(":method", method)
+		if finalHeaders.Get(":method") == "" {
+			finalHeaders.Set(":method", method)
 		}
-		if _, ok := headers[":scheme"]; !ok {
-			headers.Set(":scheme", "https")
+		if finalHeaders.Get(":scheme") == "" {
+			finalHeaders.Set(":scheme", "https")
 		}
-		if _, ok := headers[":authority"]; !ok {
-			headers.Set(":authority", s.hostname)
+		if finalHeaders.Get(":authority") == "" {
+			finalHeaders.Set(":authority", s.hostname)
 		}
-		if _, ok := headers[":path"]; !ok {
-			headers.Set(":path", path)
+		if finalHeaders.Get(":path") == "" {
+			finalHeaders.Set(":path", path)
 		}
 	} else {
-		if _, ok := headers["Host"]; !ok {
-			headers.Set("Host", s.hostname)
+		if finalHeaders.Get("Host") == "" {
+			finalHeaders.Set("Host", s.hostname)
 		}
 	}
 
-	if req.Body != nil {
-		if _, ok := headers["Content-Type"]; !ok && req.ContentType != "" {
-			headers.Set("Content-Type", req.ContentType)
-		}
-		if _, ok := headers["Content-Length"]; !ok {
-			headers.Set("Content-Length", strconv.Itoa(len(req.Body)))
+	if len(req.Body) > 0 {
+		if finalHeaders.Get("Content-Type") == "" && req.ContentType != "" {
+			finalHeaders.Set("Content-Type", req.ContentType)
 		}
 	}
 
@@ -98,38 +115,7 @@ func (s *SessionCommon) buildHeaders(req *HttpRequest, isHttp2 bool) http.Header
 				ip = fastrand.IPv4()
 			}
 		}
-		applyIpSpoof(headers, ip, s.hostname, "https", isHttp2)
+		applyIpSpoof(finalHeaders, ip, s.hostname, "https", isHttp2)
 	}
-
-	return headers
-}
-
-func (s *SessionCommon) getHeaderOrder(headers http.Header) []string {
-	if s.agent != nil && len(s.agent.HeaderOrder) > 0 {
-		orderedKeys := make([]string, 0, len(headers))
-		presentHeaders := make(map[string]bool)
-		for key := range headers {
-			presentHeaders[http.CanonicalHeaderKey(key)] = true
-		}
-
-		for _, key := range s.agent.HeaderOrder {
-			if presentHeaders[http.CanonicalHeaderKey(key)] {
-				orderedKeys = append(orderedKeys, key)
-			}
-		}
-		return orderedKeys
-	}
-
-	keys := make([]string, 0, len(headers))
-	for k := range headers {
-		keys = append(keys, k)
-	}
-
-	if s.client.randomizeHeaderSort {
-		fastrand.Shuffle(len(keys), func(i, j int) {
-			keys[i], keys[j] = keys[j], keys[i]
-		})
-		return keys
-	}
-	return keys
+	return finalHeaders
 }

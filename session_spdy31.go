@@ -1,10 +1,11 @@
 package swifthttp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -14,11 +15,12 @@ import (
 
 	"github.com/SyNdicateFoundation/legitagent"
 	"github.com/shykes/spdy-go"
+	"github.com/valyala/bytebufferpool"
 )
 
 type spdyStream struct {
 	responseChan chan<- *http.Response
-	body         *bytes.Buffer
+	body         *bytebufferpool.ByteBuffer
 	header       http.Header
 	streamEnded  bool
 }
@@ -32,10 +34,12 @@ type HttpSessionSpdy31 struct {
 	streams      map[uint32]*spdyStream
 	streamMu     sync.RWMutex
 	connClosed   atomic.Bool
+	bw           *bufio.Writer
 }
 
 func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legitagent.Agent) (HttpSession, error) {
-	framer, err := spdy.NewFramer(conn, conn)
+	bw := bufio.NewWriter(conn)
+	framer, err := spdy.NewFramer(bw, conn)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to create SPDY framer: %w", err)
@@ -47,6 +51,7 @@ func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legi
 		framer:        framer,
 		streams:       make(map[uint32]*spdyStream),
 		lastStreamID:  ^uint32(0),
+		bw:            bw,
 	}
 
 	go s3s.readLoop()
@@ -60,6 +65,7 @@ func (s *HttpSessionSpdy31) Close() error {
 		}
 		s.writeMu.Lock()
 		s.framer.WriteFrame(&spdy.GoAwayFrame{LastGoodStreamId: atomic.LoadUint32(&s.lastStreamID)})
+		s.bw.Flush()
 		s.writeMu.Unlock()
 		return s.conn.Close()
 	}
@@ -74,7 +80,7 @@ func (s *HttpSessionSpdy31) Fire(ctx context.Context, req *HttpRequest) error {
 	if s.connClosed.Load() {
 		return net.ErrClosed
 	}
-	return s.sendRequest(req, 0, nil)
+	return s.sendRequest(req, 0)
 }
 
 func (s *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*http.Response, error) {
@@ -86,26 +92,53 @@ func (s *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*htt
 	streamID := s.nextStreamID()
 
 	s.streamMu.Lock()
-	s.streams[streamID] = &spdyStream{responseChan: respChan, body: new(bytes.Buffer), header: make(http.Header)}
+	s.streams[streamID] = &spdyStream{
+		responseChan: respChan,
+		body:         bytebufferpool.Get(),
+		header:       make(http.Header),
+	}
 	s.streamMu.Unlock()
 
-	if err := s.sendRequest(req, streamID, nil); err != nil {
+	defer func() {
+		s.streamMu.Lock()
+		if stream, ok := s.streams[streamID]; ok {
+			if !stream.streamEnded {
+				bytebufferpool.Put(stream.body)
+			}
+		}
+		delete(s.streams, streamID)
+		s.streamMu.Unlock()
+	}()
+
+	if err := s.sendRequest(req, streamID); err != nil {
 		return nil, err
 	}
 
 	select {
-	case resp := <-respChan:
+	case resp, ok := <-respChan:
+		if !ok {
+			return nil, errors.New("stream closed before response was complete")
+		}
 		return resp, nil
 	case <-ctx.Done():
-		s.streamMu.Lock()
-		delete(s.streams, streamID)
-		s.streamMu.Unlock()
 		return nil, ctx.Err()
 	}
 }
 
-func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32, respChan chan *http.Response) error {
-	headers := s.buildHeaders(req, false)
+func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error {
+	var finalBody []byte
+	hasBody := len(req.Body) > 0
+	if hasBody {
+		finalBody = req.Body
+		if s.client.randomizer != nil {
+			finalBody = s.client.randomizer.Randomizer(finalBody)
+		}
+	}
+
+	headers := s.prepareHeaders(req, false)
+	if hasBody {
+		headers.Set("content-length", strconv.Itoa(len(finalBody)))
+	}
 
 	method := string(req.Method)
 	if method == "" {
@@ -118,8 +151,19 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32, respC
 
 	spdyHeaders := make(http.Header)
 	for k, v := range headers {
-		spdyHeaders[strings.ToLower(k)] = v
+		keyToWrite := strings.ToLower(k)
+		valuesToWrite := v
+		if s.client.randomizer != nil {
+			keyToWrite = s.client.randomizer.RandomizerString(keyToWrite)
+			randomizedValues := make([]string, len(v))
+			for i, val := range v {
+				randomizedValues[i] = s.client.randomizer.RandomizerString(val)
+			}
+			valuesToWrite = randomizedValues
+		}
+		spdyHeaders[keyToWrite] = valuesToWrite
 	}
+
 	spdyHeaders.Set("method", method)
 	spdyHeaders.Set("url", uri)
 	spdyHeaders.Set("version", "HTTP/1.1")
@@ -135,7 +179,6 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32, respC
 		Headers:  spdyHeaders,
 	}
 
-	hasBody := req.Body != nil && len(req.Body) > 0
 	if !hasBody {
 		synStreamFrame.CFHeader.Flags = spdy.ControlFlagFin
 	}
@@ -147,14 +190,14 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32, respC
 	if hasBody {
 		dataFrame := &spdy.DataFrame{
 			StreamId: streamID,
-			Data:     req.Body,
+			Data:     finalBody,
 			Flags:    spdy.DataFlagFin,
 		}
 		if err := s.framer.WriteFrame(dataFrame); err != nil {
 			return fmt.Errorf("spdy write data failed: %w", err)
 		}
 	}
-	return nil
+	return s.bw.Flush()
 }
 
 func (s *HttpSessionSpdy31) readLoop() {
@@ -174,6 +217,14 @@ func (s *HttpSessionSpdy31) readLoop() {
 		case *spdy.DataFrame:
 			streamID = f.StreamId
 			isFin = f.Flags&spdy.DataFlagFin != 0
+		case *spdy.RstStreamFrame:
+			s.streamMu.Lock()
+			if stream, ok := s.streams[f.StreamId]; ok && !stream.streamEnded {
+				close(stream.responseChan)
+			}
+			delete(s.streams, f.StreamId)
+			s.streamMu.Unlock()
+			continue
 		default:
 			continue
 		}
@@ -195,19 +246,24 @@ func (s *HttpSessionSpdy31) readLoop() {
 		}
 
 		if isFin {
+			s.streamMu.Lock()
+			if stream.streamEnded {
+				s.streamMu.Unlock()
+				continue
+			}
+			stream.streamEnded = true
+			s.streamMu.Unlock()
+
 			status := stream.header.Get("status")
 			statusCode, _ := strconv.Atoi(strings.Split(status, " ")[0])
 			resp := &http.Response{
 				StatusCode: statusCode,
 				Status:     status,
 				Header:     stream.header,
-				Body:       io.NopCloser(stream.body),
+				Body:       &byteBufferPoolCloser{reader: bytes.NewReader(stream.body.Bytes()), buffer: stream.body},
 				Proto:      "SPDY/3.1",
 			}
 			stream.responseChan <- resp
-			s.streamMu.Lock()
-			delete(s.streams, streamID)
-			s.streamMu.Unlock()
 		}
 	}
 }

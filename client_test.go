@@ -1,6 +1,7 @@
 package swifthttp
 
 import (
+	"github.com/SyNdicateFoundation/fastrand"
 	"reflect"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestNewHttpClient_DefaultOptions(t *testing.T) {
 	if client.tls == nil {
 		t.Error("Default tls should not be nil")
 	}
-	if client.randomizer != false {
+	if client.randomizer != nil {
 		t.Errorf("Default randomizer should be false, got %v", client.randomizer)
 	}
 	if client.enableCache != false {
@@ -107,8 +108,8 @@ func TestWithTLSCustomConfig(t *testing.T) {
 }
 
 func TestWithRandomizer(t *testing.T) {
-	client := NewHttpClient(WithRandomizer(true))
-	if !client.randomizer {
+	client := NewHttpClient(WithRandomizer(fastrand.NewEngine()))
+	if client.randomizer == nil {
 		t.Error("Expected randomizer to be true")
 	}
 }

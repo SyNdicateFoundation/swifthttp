@@ -8,28 +8,6 @@ import (
 	"testing"
 )
 
-var headerPairsDefinitionForTest = func(ipStr, host, scheme, cfRay, viaEntry, forwardedValue string) [][2]string {
-	return [][2]string{
-		{"X-Forwarded-For", ipStr},
-		{"X-Forwarded-Host", host},
-		{"X-Forwarded-Proto", scheme},
-		{"X-Real-IP", ipStr},
-		{"CF-Connecting-IP", ipStr},
-		{"CF-IPCountry", "XX"},
-		{"CF-RAY", cfRay},
-		{"True-Client-IP", ipStr},
-		{"X-Client-IP", ipStr},
-		{"Via", viaEntry},
-		{"X-Via", viaEntry},
-		{"Forwarded", forwardedValue},
-		{"X-Original-Forwarded-For", ipStr},
-		{"X-Coming-From", ipStr},
-		{"X-Cluster-Client-IP", ipStr},
-		{"Proxy-Client-IP", ipStr},
-		{"WL-Proxy-Client-IP", ipStr},
-	}
-}
-
 const cfRayPatternMarker = "MATCH_CF_RAY_PATTERN"
 
 var cfRayRegex = regexp.MustCompile(`^[a-f0-9]{16}-XXX$`)

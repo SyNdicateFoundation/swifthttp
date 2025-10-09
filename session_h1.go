@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +19,10 @@ type HttpSessionH1 struct {
 	*SessionCommon
 	net.Conn
 	connClosed atomic.Bool
+	writeMu    sync.Mutex
+	br         *bufio.Reader
+	bw         *bufio.Writer
+	requestBuf *bytebufferpool.ByteBuffer
 }
 
 func newH1Session(client *Client, conn net.Conn, hostname string, agent *legitagent.Agent) (HttpSession, error) {
@@ -24,6 +30,9 @@ func newH1Session(client *Client, conn net.Conn, hostname string, agent *legitag
 	h := &HttpSessionH1{
 		Conn:          conn,
 		SessionCommon: common,
+		br:            bufio.NewReader(conn),
+		bw:            bufio.NewWriter(conn),
+		requestBuf:    new(bytebufferpool.ByteBuffer),
 	}
 	h.connClosed.Store(false)
 	return h, nil
@@ -37,7 +46,6 @@ func (h *HttpSessionH1) Close() error {
 		if h.agent != nil && h.client.legitAgentGenerator != nil {
 			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
 		}
-
 		return h.Conn.Close()
 	}
 	return nil
@@ -52,16 +60,17 @@ func (h *HttpSessionH1) Fire(ctx context.Context, req *HttpRequest) error {
 		return net.ErrClosed
 	}
 
-	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
 
-	h.buildH1Payload(buf, req)
+	h.requestBuf.Reset()
+	h.buildH1Payload(h.requestBuf, req)
 
-	if _, err := h.Conn.Write(buf.B); err != nil {
+	if _, err := h.bw.Write(h.requestBuf.B); err != nil {
 		_ = h.Close()
 		return err
 	}
-	return nil
+	return h.bw.Flush()
 }
 
 func (h *HttpSessionH1) Request(ctx context.Context, req *HttpRequest) (*http.Response, error) {
@@ -69,9 +78,11 @@ func (h *HttpSessionH1) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		return nil, net.ErrClosed
 	}
 
-	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
-	h.buildH1Payload(buf, req)
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+
+	h.requestBuf.Reset()
+	h.buildH1Payload(h.requestBuf, req)
 
 	if h.client.timeout.Request > 0 {
 		deadline := time.Now().Add(h.client.timeout.Request)
@@ -81,13 +92,17 @@ func (h *HttpSessionH1) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		defer h.Conn.SetDeadline(time.Time{})
 	}
 
-	if _, err := h.Conn.Write(buf.B); err != nil {
+	if _, err := h.bw.Write(h.requestBuf.B); err != nil {
 		_ = h.Close()
 		return nil, fmt.Errorf("h1 request write failed: %w", err)
 	}
 
-	reader := bufio.NewReader(h.Conn)
-	resp, err := http.ReadResponse(reader, nil)
+	if err := h.bw.Flush(); err != nil {
+		_ = h.Close()
+		return nil, fmt.Errorf("h1 request flush failed: %w", err)
+	}
+
+	resp, err := http.ReadResponse(h.br, nil)
 	if err != nil {
 		_ = h.Close()
 		return nil, fmt.Errorf("h1 read response failed: %w", err)
@@ -101,31 +116,61 @@ func (h *HttpSessionH1) buildH1Payload(buf *bytebufferpool.ByteBuffer, req *Http
 		method = http.MethodGet
 	}
 
-	_, _ = buf.WriteString(method)
-	_ = buf.WriteByte(' ')
-
 	uri := req.RawPath
 	if uri == "" {
 		uri = "/"
 	}
-	_, _ = buf.WriteString(uri)
-	_ = buf.WriteByte(' ')
-	_, _ = buf.WriteString("HTTP/1.1\r\n")
 
-	headers := h.buildHeaders(req, false)
-	headerKeys := h.getHeaderOrder(headers)
+	buf.WriteString(method)
+	buf.WriteByte(' ')
+	buf.WriteString(uri)
+	buf.WriteString(" HTTP/1.1\r\n")
 
-	for _, k := range headerKeys {
-		for _, v := range headers[k] {
-			_, _ = buf.WriteString(k)
-			_, _ = buf.WriteString(": ")
-			_, _ = buf.WriteString(v)
-			_, _ = buf.WriteString("\r\n")
+	var finalBody []byte
+	hasBody := len(req.Body) > 0
+	if hasBody {
+		finalBody = req.Body
+		if h.client.randomizer != nil {
+			finalBody = h.client.randomizer.Randomizer(finalBody)
 		}
 	}
-	_, _ = buf.WriteString("\r\n")
 
-	if req.Body != nil {
-		_, _ = buf.Write(req.Body)
+	headers := h.prepareHeaders(req, false)
+	if hasBody {
+		headers.Set("Content-Length", strconv.Itoa(len(finalBody)))
+	}
+
+	var headerOrder []string
+	if h.agent != nil && len(h.agent.HeaderOrder) > 0 {
+		headerOrder = h.agent.HeaderOrder
+	} else {
+		headerOrder = make([]string, 0, len(headers))
+		for k := range headers {
+			headerOrder = append(headerOrder, k)
+		}
+	}
+
+	for _, k := range headerOrder {
+		values, ok := headers[k]
+		if !ok {
+			continue
+		}
+		for _, v := range values {
+			keyToWrite := k
+			valueToWrite := v
+			if h.client.randomizer != nil {
+				keyToWrite = h.client.randomizer.RandomizerString(keyToWrite)
+				valueToWrite = h.client.randomizer.RandomizerString(valueToWrite)
+			}
+			buf.WriteString(keyToWrite)
+			buf.WriteString(": ")
+			buf.WriteString(valueToWrite)
+			buf.WriteString("\r\n")
+		}
+	}
+	buf.WriteString("\r\n")
+
+	if hasBody {
+		buf.Write(finalBody)
 	}
 }

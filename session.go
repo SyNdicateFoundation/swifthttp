@@ -3,14 +3,16 @@ package swifthttp
 import (
 	"context"
 	"fmt"
-	"github.com/refraction-networking/uquic/http3"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/SyNdicateFoundation/legitagent"
+	"github.com/refraction-networking/uquic/http3"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 )
@@ -28,6 +30,36 @@ var (
 	spdyTLSProtos = []string{"spdy/3.1"}
 )
 
+var globalDnsCache = sync.Map{}
+
+func (hc *Client) lookupIP(hostname string) ([]net.IP, error) {
+	if !hc.enableCache {
+		return net.LookupIP(hostname)
+	}
+
+	if entry, found := globalDnsCache.Load(hostname); found {
+		e := entry.(*dnsCacheEntry)
+		if time.Now().Before(e.expiry) {
+			return e.ips, nil
+		}
+	}
+
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return nil, err
+	}
+
+	newEntry := &dnsCacheEntry{
+		ips:      ips,
+		expiry:   time.Now().Add(DefaultCacheTTL),
+		hostname: hostname,
+	}
+
+	globalDnsCache.Store(hostname, newEntry)
+
+	return ips, nil
+}
+
 func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, error) {
 	hostname := u.Hostname()
 	portStr := u.Port()
@@ -39,7 +71,7 @@ func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, e
 		}
 	}
 
-	ips, err := net.LookupIP(hostname)
+	ips, err := hc.lookupIP(hostname)
 	if err != nil {
 		return nil, fmt.Errorf("dns lookup failed for %s: %w", hostname, err)
 	}
@@ -53,17 +85,25 @@ func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, e
 	}
 
 	addr := &net.TCPAddr{IP: ips[0], Port: port}
-	isTLS := u.Scheme == "https"
+	isTLS := u.Scheme == "https" || hc.tls.TLSMode == HttpTlsModeForever
 
 	return hc.createSessionWithAddr(ctx, addr, hostname, isTLS)
 }
 
 func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, hostname string, isTLS bool) (HttpSession, error) {
+	conn, err := hc.dial(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return hc.CreateSessionOverConn(ctx, conn, hostname, isTLS)
+}
+
+func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, hostname string, isTLS bool) (HttpSession, error) {
 	var agent *legitagent.Agent
 
 	if hc.legitAgentGenerator != nil {
 		var err error
-
 		agent, err = hc.legitAgentGenerator.Generate()
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate legitagent: %w", err)
@@ -72,27 +112,23 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 
 	if hc.httpVersion == HttpVersion3_0 {
 		if !isTLS {
-			if agent != nil && hc.legitAgentGenerator != nil {
+			if agent != nil {
 				hc.legitAgentGenerator.ReleaseAgent(agent)
 			}
 			return nil, fmt.Errorf("HTTP/3 requires a TLS connection")
 		}
-		sessionTlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos)
-		session, err := newH3Session(ctx, hc, addr, hostname, agent, sessionTlsConfig)
-		if err != nil {
-			if agent != nil && hc.legitAgentGenerator != nil {
-				hc.legitAgentGenerator.ReleaseAgent(agent)
-			}
-		}
-		return session, err
-	}
 
-	conn, err := hc.dial(ctx, addr)
-	if err != nil {
-		if agent != nil && hc.legitAgentGenerator != nil {
+		addr, ok := conn.RemoteAddr().(*net.UDPAddr)
+		if !ok {
+			return nil, fmt.Errorf("HTTP/3 requires a TCP address to derive UDP address, but got %T", conn.RemoteAddr())
+		}
+
+		session, err := newH3Session(ctx, hc, (*net.TCPAddr)(addr), hostname, agent, hc.prepareTLSConfig(hostname, h3TLSProtos))
+		if err != nil && agent != nil {
 			hc.legitAgentGenerator.ReleaseAgent(agent)
 		}
-		return nil, err
+
+		return session, err
 	}
 
 	if isTLS {
@@ -123,16 +159,14 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 		if agent != nil && agent.ClientHelloSpec != nil {
 			if err := uconn.ApplyPreset(agent.ClientHelloSpec); err != nil {
 				uconn.Close()
-				if agent != nil && hc.legitAgentGenerator != nil {
-					hc.legitAgentGenerator.ReleaseAgent(agent)
-				}
+				hc.legitAgentGenerator.ReleaseAgent(agent)
 				return nil, fmt.Errorf("failed to apply utls preset: %w", err)
 			}
 		}
 
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			uconn.Close()
-			if agent != nil && hc.legitAgentGenerator != nil {
+			if agent != nil {
 				hc.legitAgentGenerator.ReleaseAgent(agent)
 			}
 			return nil, fmt.Errorf("utls handshake failed: %w", err)
@@ -141,6 +175,7 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 	}
 
 	var session HttpSession
+	var err error
 	switch hc.httpVersion {
 	case HttpVersion1_1:
 		session, err = newH1Session(hc, conn, hostname, agent)
@@ -153,16 +188,15 @@ func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, 
 		err = fmt.Errorf("unsupported http version for tcp session: %s", hc.httpVersion)
 	}
 
-	if err != nil {
-		if agent != nil && hc.legitAgentGenerator != nil {
-			hc.legitAgentGenerator.ReleaseAgent(agent)
-		}
+	if err != nil && agent != nil {
+		hc.legitAgentGenerator.ReleaseAgent(agent)
 	}
 	return session, err
 }
 
 func (hc *Client) prepareTLSConfig(hostname string, alpns []string) *utls.Config {
 	var tlsConfig *utls.Config
+
 	if hc.tls != nil && hc.tls.UTLSConfig != nil {
 		tlsConfig = hc.tls.UTLSConfig.Clone()
 	} else {
@@ -170,6 +204,7 @@ func (hc *Client) prepareTLSConfig(hostname string, alpns []string) *utls.Config
 			InsecureSkipVerify: true,
 		}
 	}
+
 	tlsConfig.ServerName = hostname
 	tlsConfig.NextProtos = alpns
 	return tlsConfig
