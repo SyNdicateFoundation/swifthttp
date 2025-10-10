@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 )
 
 type byteBufferPoolCloser struct {
@@ -52,6 +53,49 @@ func newSessionCommon(client *Client, hostname string, agent *legitagent.Agent) 
 	}
 
 	return sc
+}
+func (s *SessionCommon) prepareHeaderOrder(headers http.Header) []string {
+	lengthHeaders := len(headers)
+
+	if s.client.randomizeHeaderSort {
+		headerOrder := make([]string, 0, lengthHeaders)
+		for k := range headers {
+			headerOrder = append(headerOrder, k)
+		}
+
+		fastrand.Shuffle(lengthHeaders, func(a, b int) {
+			headerOrder[a], headerOrder[b] = headerOrder[b], headerOrder[a]
+		})
+
+		return headerOrder
+	}
+
+	est := lengthHeaders
+	if s.agent != nil {
+		est += len(s.agent.HeaderOrder)
+	}
+
+	headerOrder := make([]string, 0, est)
+	seen := make(map[string]struct{}, est)
+
+	if s.agent != nil {
+		for _, k := range s.agent.HeaderOrder {
+			lower := strings.ToLower(k)
+			if _, ok := headers[lower]; ok {
+				headerOrder = append(headerOrder, k)
+				seen[k] = struct{}{}
+			}
+		}
+	}
+
+	for k := range headers {
+		lower := strings.ToLower(k)
+		if _, ok := seen[lower]; !ok {
+			headerOrder = append(headerOrder, k)
+		}
+	}
+
+	return headerOrder
 }
 
 func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Header {

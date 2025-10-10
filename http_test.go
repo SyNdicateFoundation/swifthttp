@@ -89,7 +89,14 @@ func TestClient_Request_HTTP2_0(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		r.Body.Close()
-		receivedChan <- receivedRequest{Method: r.Method, URL: r.URL, Proto: r.Proto, Header: r.Header, Body: body, Host: r.Host}
+		receivedChan <- receivedRequest{
+			Method: r.Method,
+			URL:    r.URL,
+			Proto:  r.Proto,
+			Header: r.Header,
+			Body:   body,
+			Host:   r.Host,
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -129,6 +136,7 @@ func TestClient_Request_HTTP2_0(t *testing.T) {
 
 	select {
 	case rec := <-receivedChan:
+		t.Logf("Received request at server: %#v", rec)
 		if rec.Proto != "HTTP/2.0" {
 			t.Errorf("Expected protocol HTTP/2.0, got %s", rec.Proto)
 		}

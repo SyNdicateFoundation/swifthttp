@@ -232,38 +232,32 @@ func (h *HttpSessionH2) Request(ctx context.Context, req *HttpRequest) (*http.Re
 }
 
 func (h *HttpSessionH2) sendRequestFrames(streamID uint32, req *HttpRequest, expectResponse bool) error {
-	finalHeaders := h.prepareHeaders(req, true)
-
-	var headerOrder []string
-	if h.agent != nil && len(h.agent.HeaderOrder) > 0 {
-		headerOrder = h.agent.HeaderOrder
-	} else {
-		headerOrder = make([]string, 0, len(finalHeaders))
-		for k := range finalHeaders {
-			headerOrder = append(headerOrder, k)
-		}
-	}
+	headers := h.prepareHeaders(req, true)
+	headerOrder := h.prepareHeaderOrder(headers)
 
 	hpackEncoderBuf := h.client.hpackEncoderBufPool.Get().(*bytebufferpool.ByteBuffer)
 	hpackEncoderBuf.Reset()
 	defer h.client.hpackEncoderBufPool.Put(hpackEncoderBuf)
 	hpackEncoder := hpack.NewEncoder(hpackEncoderBuf)
 
-	for _, key := range headerOrder {
-		values, ok := finalHeaders[key]
+	for _, k := range headerOrder {
+		values, ok := headers[k]
 		if !ok {
 			continue
 		}
-		finalKey := key
-		if h.client.randomizer != nil {
-			finalKey = h.client.randomizer.RandomizerString(key)
-		}
-		for _, value := range values {
-			finalValue := value
+		for _, v := range values {
+			keyToWrite := k
+			valueToWrite := v
+
 			if h.client.randomizer != nil {
-				finalValue = h.client.randomizer.RandomizerString(value)
+				keyToWrite = h.client.randomizer.RandomizerString(keyToWrite)
+				valueToWrite = h.client.randomizer.RandomizerString(valueToWrite)
 			}
-			hpackEncoder.WriteField(hpack.HeaderField{Name: strings.ToLower(finalKey), Value: finalValue})
+
+			hpackEncoder.WriteField(hpack.HeaderField{
+				Name:  strings.ToLower(keyToWrite),
+				Value: valueToWrite,
+			})
 		}
 	}
 

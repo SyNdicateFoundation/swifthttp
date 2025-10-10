@@ -140,15 +140,7 @@ func (h *HttpSessionH1) buildH1Payload(buf *bytebufferpool.ByteBuffer, req *Http
 		headers.Set("Content-Length", strconv.Itoa(len(finalBody)))
 	}
 
-	var headerOrder []string
-	if h.agent != nil && len(h.agent.HeaderOrder) > 0 {
-		headerOrder = h.agent.HeaderOrder
-	} else {
-		headerOrder = make([]string, 0, len(headers))
-		for k := range headers {
-			headerOrder = append(headerOrder, k)
-		}
-	}
+	headerOrder := h.prepareHeaderOrder(headers)
 
 	for _, k := range headerOrder {
 		values, ok := headers[k]
@@ -158,16 +150,19 @@ func (h *HttpSessionH1) buildH1Payload(buf *bytebufferpool.ByteBuffer, req *Http
 		for _, v := range values {
 			keyToWrite := k
 			valueToWrite := v
+
 			if h.client.randomizer != nil {
 				keyToWrite = h.client.randomizer.RandomizerString(keyToWrite)
 				valueToWrite = h.client.randomizer.RandomizerString(valueToWrite)
 			}
+
 			buf.WriteString(keyToWrite)
 			buf.WriteString(": ")
 			buf.WriteString(valueToWrite)
 			buf.WriteString("\r\n")
 		}
 	}
+
 	buf.WriteString("\r\n")
 
 	if hasBody {
