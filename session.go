@@ -122,7 +122,7 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 			return nil, fmt.Errorf("HTTP/3 requires a TCP address to derive UDP address, but got %T", conn.RemoteAddr())
 		}
 
-		tlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos, agent != nil)
+		tlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos)
 		uconn := utls.UClient(conn, tlsConfig, hc.getHelloID(agent))
 
 		if agent != nil && agent.ClientHelloSpec != nil {
@@ -148,7 +148,7 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 	}
 
 	if isTLS {
-		tlsConfig := hc.prepareTLSConfig(hostname, hc.getTLSProtos(), agent != nil)
+		tlsConfig := hc.prepareTLSConfig(hostname, hc.getTLSProtos())
 		uconn := utls.UClient(conn, tlsConfig, hc.getHelloID(agent))
 
 		if agent != nil && agent.ClientHelloSpec != nil {
@@ -222,7 +222,7 @@ func (hc *Client) releaseAgent(agent *legitagent.Agent) {
 	}
 }
 
-func (hc *Client) prepareTLSConfig(hostname string, alpns []string, hasAgent bool) *utls.Config {
+func (hc *Client) prepareTLSConfig(hostname string, alpns []string) *utls.Config {
 	var tlsConfig *utls.Config
 
 	if hc.tls != nil && hc.tls.UTLSConfig != nil {
@@ -233,7 +233,7 @@ func (hc *Client) prepareTLSConfig(hostname string, alpns []string, hasAgent boo
 		tlsConfig.PreferSkipResumptionOnNilExtension = true
 	}
 
-	if !hasAgent && hc.tls != nil && hc.tls.OptimizedConn {
+	if hc.tls != nil && hc.tls.OptimizedConn {
 		tlsConfig.CipherSuites = []uint16{
 			utls.TLS_AES_128_GCM_SHA256,
 			utls.TLS_AES_256_GCM_SHA384,
