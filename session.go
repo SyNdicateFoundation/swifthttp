@@ -188,9 +188,6 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 		err = fmt.Errorf("unsupported http version for tcp session: %s", hc.httpVersion)
 	}
 
-	if err != nil && agent != nil {
-		hc.legitAgentGenerator.ReleaseAgent(agent)
-	}
 	return session, err
 }
 
