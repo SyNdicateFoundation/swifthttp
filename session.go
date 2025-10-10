@@ -236,7 +236,6 @@ func (hc *Client) prepareTLSConfig(hostname string, alpns []string) *utls.Config
 	if hc.tls != nil && hc.tls.OptimizedConn {
 		tlsConfig.CipherSuites = []uint16{
 			utls.TLS_AES_128_GCM_SHA256,
-			utls.TLS_AES_256_GCM_SHA384,
 			utls.TLS_CHACHA20_POLY1305_SHA256,
 		}
 
