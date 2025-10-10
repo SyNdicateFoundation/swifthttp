@@ -87,7 +87,7 @@ func BenchmarkH2_HighConcurrency_NewConnections(b *testing.B) {
 	serverURL, cleanup := setupBenchmarkServer(true)
 	defer cleanup()
 
-	client := NewHttpClient(WithVersion(HttpVersion2_0), WithCache(true))
+	client := NewHttpClient(WithVersion(HttpVersion2_0), WithEnableReader(true))
 	req := NewRequest()
 
 	b.ResetTimer()

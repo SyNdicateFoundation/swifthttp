@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -103,8 +102,7 @@ func (h *httpSessionH3) Fire(ctx context.Context, req *HttpRequest) error {
 	}
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-			}
+			recover()
 		}()
 		resp, err := h.Request(ctx, req)
 		if err != nil {
@@ -150,16 +148,13 @@ func (h *httpSessionH3) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		uri = h.client.randomizer.RandomizerString(uri)
 	}
 
-	urlStr := fmt.Sprintf("https://%s%s", h.hostname, uri)
+	urlStr := fmt.Sprintf("https://%s%s", h.host, uri)
 	stdReq, err := http.NewRequestWithContext(ctx, method, urlStr, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standard http.Request: %w", err)
 	}
 
 	headers := h.prepareHeaders(req, false)
-	if finalBody != nil {
-		headers.Set("Content-Length", strconv.Itoa(len(finalBody)))
-	}
 
 	if h.client.randomizer != nil {
 		randomizedHeaders := make(http.Header)
@@ -176,6 +171,7 @@ func (h *httpSessionH3) Request(ctx context.Context, req *HttpRequest) (*http.Re
 
 	resp, err := h.rt.RoundTrip(stdReq)
 	if err != nil {
+		h.Close()
 		return nil, err
 	}
 	return resp, nil

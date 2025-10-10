@@ -33,10 +33,6 @@ var (
 var globalDnsCache = sync.Map{}
 
 func (hc *Client) lookupIP(hostname string) ([]net.IP, error) {
-	if !hc.enableCache {
-		return net.LookupIP(hostname)
-	}
-
 	if entry, found := globalDnsCache.Load(hostname); found {
 		e := entry.(*dnsCacheEntry)
 		if time.Now().Before(e.expiry) {

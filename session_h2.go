@@ -113,6 +113,12 @@ func newH2Session(client *Client, conn net.Conn, hostname string, host string, a
 		return nil, err
 	}
 
+	if client.enableReaderLoop {
+		h2s.enableReaderLoop.Do(func() {
+			go h2s.readLoop()
+		})
+	}
+
 	return h2s, nil
 }
 
@@ -350,6 +356,7 @@ func (h *HttpSessionH2) handleSettingsFrame(f *http2.SettingsFrame) {
 	if f.IsAck() {
 		return
 	}
+
 	go func() {
 		h.writeMu.Lock()
 		defer h.writeMu.Unlock()
@@ -362,6 +369,7 @@ func (h *HttpSessionH2) handleSettingsFrame(f *http2.SettingsFrame) {
 				atomic.StoreUint32(&h.effectivePeerMaxFrameSize, s.Val)
 			}
 		}
+
 		h.framer.WriteSettingsAck()
 		h.bw.Flush()
 	}()
@@ -371,6 +379,7 @@ func (h *HttpSessionH2) handlePingFrame(f *http2.PingFrame) {
 	if f.IsAck() {
 		return
 	}
+
 	pingData := f.Data
 	go func() {
 		h.writeMu.Lock()
@@ -467,5 +476,47 @@ func (h *HttpSessionH2) WriteSettings(settings []http2.Setting) error {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
 	h.framer.WriteSettings(settings...)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WritePing(pingData [8]byte) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WritePing(true, pingData)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WritePriority(streamID uint32, priority http2.PriorityParam) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WritePriority(streamID, priority)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WritePushPromise(pushPromise http2.PushPromiseParam) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WritePushPromise(pushPromise)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WriteHeaders(headers http2.HeadersFrameParam) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WriteHeaders(headers)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WriteDataFrame(streamID uint32, endStream bool, data []byte) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WriteData(streamID, endStream, data)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WriteContinuation(streamID uint32, endHeaders bool, data []byte) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WriteContinuation(streamID, endHeaders, data)
 	return h.bw.Flush()
 }

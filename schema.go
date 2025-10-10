@@ -77,7 +77,7 @@ type Client struct {
 	legitAgentGenerator *legitagent.Generator
 	randomizer          fastrand.Engine
 	randomizeHeaderSort bool
-	enableCache         bool
+	enableReaderLoop    bool
 	customH2Settings    []http2.Setting
 
 	h2StreamPool        sync.Pool

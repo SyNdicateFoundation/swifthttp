@@ -27,14 +27,15 @@ type spdyStream struct {
 
 type HttpSessionSpdy31 struct {
 	*SessionCommon
-	conn         net.Conn
-	framer       *spdy.Framer
-	writeMu      sync.Mutex
-	lastStreamID uint32
-	streams      map[uint32]*spdyStream
-	streamMu     sync.RWMutex
-	connClosed   atomic.Bool
-	bw           *bufio.Writer
+	conn             net.Conn
+	framer           *spdy.Framer
+	writeMu          sync.Mutex
+	lastStreamID     uint32
+	streams          map[uint32]*spdyStream
+	streamMu         sync.RWMutex
+	connClosed       atomic.Bool
+	bw               *bufio.Writer
+	enableReaderLoop sync.Once
 }
 
 func newSpdy3Session(client *Client, conn net.Conn, hostname string, host string, agent *legitagent.Agent) (HttpSession, error) {
@@ -54,7 +55,12 @@ func newSpdy3Session(client *Client, conn net.Conn, hostname string, host string
 		bw:            bw,
 	}
 
-	go s3s.readLoop()
+	if client.enableReaderLoop {
+		s3s.enableReaderLoop.Do(func() {
+			go s3s.readLoop()
+		})
+	}
+
 	return s3s, nil
 }
 
@@ -72,8 +78,12 @@ func (h *HttpSessionSpdy31) Close() error {
 	return nil
 }
 
-func (h *HttpSessionSpdy31) nextStreamID() uint32 {
+func (h *HttpSessionSpdy31) NextStreamID() uint32 {
 	return atomic.AddUint32(&h.lastStreamID, 2)
+}
+
+func (h *HttpSessionSpdy31) CurrentStreamID() uint32 {
+	return atomic.LoadUint32(&h.lastStreamID)
 }
 
 func (h *HttpSessionSpdy31) Fire(ctx context.Context, req *HttpRequest) error {
@@ -88,8 +98,12 @@ func (h *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*htt
 		return nil, net.ErrClosed
 	}
 
+	h.enableReaderLoop.Do(func() {
+		go h.readLoop()
+	})
+
 	respChan := make(chan *http.Response, 1)
-	streamID := h.nextStreamID()
+	streamID := h.NextStreamID()
 
 	h.streamMu.Lock()
 	h.streams[streamID] = &spdyStream{
@@ -202,7 +216,14 @@ func (h *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error
 			return fmt.Errorf("spdy write data failed: %w", err)
 		}
 	}
+
 	return h.bw.Flush()
+}
+
+func (h *HttpSessionSpdy31) WriteFrame(frame spdy.Frame) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	return h.framer.WriteFrame(frame)
 }
 
 func (h *HttpSessionSpdy31) readLoop() {

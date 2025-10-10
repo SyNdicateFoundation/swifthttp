@@ -152,9 +152,9 @@ func WithRandomizedHeaderSort(randomize bool) OptionFunc {
 	}
 }
 
-func WithCache(enable bool) OptionFunc {
+func WithEnableReader(enable bool) OptionFunc {
 	return func(hc *Client) {
-		hc.enableCache = enable
+		hc.enableReaderLoop = enable
 	}
 }
 

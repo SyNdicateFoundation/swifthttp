@@ -197,7 +197,10 @@ func TestClient_Request_HTTP3_0(t *testing.T) {
 	defer cleanup()
 
 	client := NewHttpClient(WithVersion(HttpVersion3_0))
-	httpReq := NewRequest(WithMethod(RequestTypePost), WithBody([]byte(`{}`), "application/json"))
+	httpReq := NewRequest(
+		WithMethod(RequestTypePost),
+		WithBody([]byte(`{}`), "application/json"),
+	)
 
 	session, err := client.CreateSession(context.Background(), serverURL)
 	if err != nil {

@@ -44,8 +44,8 @@ func TestNewHttpClient_DefaultOptions(t *testing.T) {
 	if client.randomizer != nil {
 		t.Errorf("Default randomizer should be false, got %v", client.randomizer)
 	}
-	if client.enableCache != false {
-		t.Errorf("Default enableCache should be false, got %v", client.enableCache)
+	if client.enableReaderLoop != false {
+		t.Errorf("Default enableCache should be false, got %v", client.enableReaderLoop)
 	}
 }
 
