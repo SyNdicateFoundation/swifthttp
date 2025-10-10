@@ -3,6 +3,7 @@ package swifthttp
 import (
 	"github.com/SyNdicateFoundation/fastrand"
 	"github.com/valyala/bytebufferpool"
+	"golang.org/x/net/http2"
 	"net/http"
 	"sync"
 	"time"
@@ -154,6 +155,12 @@ func WithRandomizedHeaderSort(randomize bool) OptionFunc {
 func WithCache(enable bool) OptionFunc {
 	return func(hc *Client) {
 		hc.enableCache = enable
+	}
+}
+
+func WithCustomH2Settings(settings []http2.Setting) OptionFunc {
+	return func(client *Client) {
+		client.customH2Settings = settings
 	}
 }
 

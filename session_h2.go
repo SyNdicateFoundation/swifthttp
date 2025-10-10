@@ -85,6 +85,8 @@ func newH2Session(client *Client, conn net.Conn, hostname string, host string, a
 		for id, val := range agent.H2Settings {
 			settings = append(settings, http2.Setting{ID: id, Val: val})
 		}
+	} else if client.customH2Settings != nil {
+		settings = client.customH2Settings
 	} else {
 		settings = []http2.Setting{
 			{ID: http2.SettingHeaderTableSize, Val: 65536},

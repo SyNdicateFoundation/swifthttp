@@ -3,6 +3,7 @@ package swifthttp
 import (
 	"github.com/SyNdicateFoundation/fastrand"
 	"github.com/SyNdicateFoundation/legitagent"
+	"golang.org/x/net/http2"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -77,6 +78,7 @@ type Client struct {
 	randomizer          fastrand.Engine
 	randomizeHeaderSort bool
 	enableCache         bool
+	customH2Settings    []http2.Setting
 
 	h2StreamPool        sync.Pool
 	hpackEncoderBufPool sync.Pool
