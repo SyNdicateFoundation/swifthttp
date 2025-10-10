@@ -4,6 +4,8 @@ github.com/SyNdicateFoundation/fastrand v1.0.0 h1:v0Nyc/0Ja91utWbTYeWDMXcS9ILqoQ
 github.com/SyNdicateFoundation/fastrand v1.0.0/go.mod h1:scoNe8HD8j06MLAOsiy//Lyd4JCGycOhFFhFqz4DKsE=
 github.com/SyNdicateFoundation/legitagent v1.0.0 h1:ftwAN1ZF/BLCKxySUa0/6hKx9732ADpzB/RHIF2Rw7A=
 github.com/SyNdicateFoundation/legitagent v1.0.0/go.mod h1:QGUbXe7PaEtF3dS+ek7+Amr2oxkcc/tmO5+YbBdZ4K4=
+github.com/SyNdicateFoundation/legitagent v1.0.3 h1:r/S0xuWRJwdEPb2HS7sAsuXeLtXmY/m8IeOsVYkVc3w=
+github.com/SyNdicateFoundation/legitagent v1.0.3/go.mod h1:HOhIstjRRjScObVEYb9/EIgL8JG4fzE8v1jWcpRty6Y=
 github.com/SyNdicateFoundation/singproxy v1.0.0 h1:DCtEAhWE97TVk85phbqfxN4M7bNt0H4ltES1orb+8b8=
 github.com/SyNdicateFoundation/singproxy v1.0.0/go.mod h1:D3SpEioM8xQfLSMXAPqGV2T+QQA8K34MHwj9QO+qlog=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=

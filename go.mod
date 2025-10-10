@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/SyNdicateFoundation/fastrand v1.0.0
-	github.com/SyNdicateFoundation/legitagent v1.0.0
+	github.com/SyNdicateFoundation/legitagent v1.0.3
 	github.com/SyNdicateFoundation/singproxy v1.0.0
 	github.com/refraction-networking/uquic v0.0.6
 	github.com/refraction-networking/utls v1.8.0
