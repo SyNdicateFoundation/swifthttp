@@ -107,10 +107,20 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 	}
 	req.headerMx.RUnlock()
 
-	if s.agent != nil && s.agent.Headers != nil {
-		for key, values := range s.agent.Headers {
-			if _, exists := finalHeaders[key]; !exists {
-				finalHeaders[key] = values
+	if s.agent != nil {
+		if s.agent.Headers != nil {
+			for key, values := range s.agent.Headers {
+				if _, exists := finalHeaders[key]; !exists {
+					finalHeaders[key] = values
+				} else {
+					finalHeaders[key] = append(finalHeaders[key], values...)
+				}
+			}
+		}
+
+		if s.agent.UserAgent != "" {
+			if finalHeaders.Get("User-Agent") == "" {
+				finalHeaders.Set("User-Agent", s.agent.UserAgent)
 			}
 		}
 	}
