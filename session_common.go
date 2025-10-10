@@ -130,9 +130,13 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 		method = http.MethodGet
 	}
 
-	path := req.RawPath
-	if path == "" {
-		path = "/"
+	uri := req.RawPath
+	if uri == "" {
+		uri = "/"
+	}
+
+	if s.client.randomizer != nil {
+		uri = s.client.randomizer.RandomizerString(uri)
 	}
 
 	if isHttp2 {
@@ -146,7 +150,7 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 			finalHeaders.Set(":authority", s.hostname)
 		}
 		if finalHeaders.Get(":path") == "" {
-			finalHeaders.Set(":path", path)
+			finalHeaders.Set(":path", uri)
 		}
 
 		if finalHeaders.Get("Connection") == "" {
