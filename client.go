@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/SyNdicateFoundation/legitagent"
-	"github.com/SyNdicateFoundation/signproxy"
+	"github.com/SyNdicateFoundation/singproxy"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -79,7 +79,7 @@ func WithIpSpoofer(perSession bool, useIpv6 bool) OptionFunc {
 	}
 }
 
-func WithProxy(proxy signproxy.Proxy) OptionFunc {
+func WithProxy(proxy singproxy.Proxy) OptionFunc {
 	return func(hc *Client) {
 		if proxy == nil {
 			panic("WithProxy: proxy cannot be nil")

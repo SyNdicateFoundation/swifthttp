@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SyNdicateFoundation/signproxy"
+	"github.com/SyNdicateFoundation/singproxy"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -69,7 +69,7 @@ const DefaultCacheTTL = 5 * time.Minute
 
 type Client struct {
 	timeout             HttpTimeout
-	proxy               signproxy.Proxy
+	proxy               singproxy.Proxy
 	ipSpoofing          *ipSpoofConfig
 	tls                 *HttpTLSConfig
 	httpVersion         HttpVersion

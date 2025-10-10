@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/SyNdicateFoundation/legitagent"
-	"github.com/SyNdicateFoundation/signproxy"
+	"github.com/SyNdicateFoundation/singproxy"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -83,7 +83,7 @@ func TestWithAgentGenerator(t *testing.T) {
 }
 
 func TestWithProxy(t *testing.T) {
-	proxy := signproxy.Direct
+	proxy := singproxy.Direct
 	client := NewHttpClient(WithProxy(proxy))
 	if client.proxy == nil {
 		t.Fatal("proxy is nil after WithProxy")
