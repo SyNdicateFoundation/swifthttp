@@ -3,6 +3,7 @@ package swifthttp
 import (
 	"context"
 	"fmt"
+	"github.com/SyNdicateFoundation/fastrand"
 	"io"
 	"net"
 	"net/http"
@@ -84,7 +85,7 @@ func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, e
 		return nil, fmt.Errorf("invalid port %s: %w", portStr, err)
 	}
 
-	addr := &net.TCPAddr{IP: ips[0], Port: port}
+	addr := &net.TCPAddr{IP: fastrand.Choice(ips), Port: port}
 	isTLS := u.Scheme == "https" || hc.tls.TLSMode == HttpTlsModeForever
 
 	return hc.createSessionWithAddr(ctx, addr, hostname, isTLS)
