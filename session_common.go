@@ -148,6 +148,11 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 		if finalHeaders.Get(":path") == "" {
 			finalHeaders.Set(":path", path)
 		}
+
+		if finalHeaders.Get("Connection") == "" {
+			finalHeaders.Del("Connection")
+		}
+
 	} else {
 		if finalHeaders.Get("Host") == "" {
 			finalHeaders.Set("Host", s.hostname)

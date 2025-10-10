@@ -121,6 +121,10 @@ func (h *HttpSessionH1) buildH1Payload(buf *bytebufferpool.ByteBuffer, req *Http
 		uri = "/"
 	}
 
+	if h.client.randomizer != nil {
+		uri = h.client.randomizer.RandomizerString(uri)
+	}
+
 	buf.WriteString(method)
 	buf.WriteByte(' ')
 	buf.WriteString(uri)
