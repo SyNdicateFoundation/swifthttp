@@ -13,7 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/SyNdicateFoundation/fastrand"
 	"github.com/SyNdicateFoundation/legitagent"
 	"github.com/valyala/bytebufferpool"
 	"golang.org/x/net/http2"
@@ -21,8 +20,6 @@ import (
 )
 
 var preface = []byte(http2.ClientPreface)
-
-const initialWindowSizeIncrement = 15663105
 
 type h2Stream struct {
 	id           uint32
@@ -59,6 +56,7 @@ type HttpSessionH2 struct {
 	connClosed                atomic.Bool
 	effectivePeerMaxFrameSize uint32
 	bw                        *bufio.Writer
+	enableReaderLoop          sync.Once
 }
 
 func newH2Session(client *Client, conn net.Conn, hostname string, host string, agent *legitagent.Agent) (HttpSession, error) {
@@ -78,15 +76,27 @@ func newH2Session(client *Client, conn net.Conn, hostname string, host string, a
 		effectivePeerMaxFrameSize: 16384,
 		bw:                        bw,
 	}
+
 	h2s.framer.AllowIllegalWrites = true
+	h2s.framer.AllowIllegalReads = true
 
 	var settings []http2.Setting
 	if agent != nil && agent.H2Settings != nil {
+		if effectivePeerMaxFrameSize, ok := agent.H2Settings[http2.SettingMaxFrameSize]; ok {
+			h2s.effectivePeerMaxFrameSize = effectivePeerMaxFrameSize
+		}
+
 		for id, val := range agent.H2Settings {
 			settings = append(settings, http2.Setting{ID: id, Val: val})
 		}
 	} else if client.customH2Settings != nil {
 		settings = client.customH2Settings
+
+		for _, sett := range settings {
+			if sett.ID == http2.SettingMaxFrameSize {
+				h2s.effectivePeerMaxFrameSize = sett.Val
+			}
+		}
 	} else {
 		settings = []http2.Setting{
 			{ID: http2.SettingHeaderTableSize, Val: 65536},
@@ -98,69 +108,11 @@ func newH2Session(client *Client, conn net.Conn, hostname string, host string, a
 		}
 	}
 
-	h2s.writeMu.Lock()
-	if err := h2s.framer.WriteSettings(settings...); err != nil {
-		h2s.writeMu.Unlock()
+	if err := h2s.WriteSettings(settings); err != nil {
 		conn.Close()
 		return nil, err
-	}
-	if err := h2s.framer.WriteWindowUpdate(0, uint32(initialWindowSizeIncrement+fastrand.Int(-100000, 100000))); err != nil {
-		h2s.writeMu.Unlock()
-		conn.Close()
-		return nil, err
-	}
-	if err := h2s.bw.Flush(); err != nil {
-		h2s.writeMu.Unlock()
-		conn.Close()
-		return nil, err
-	}
-	h2s.writeMu.Unlock()
-
-	frame, err := h2s.framer.ReadFrame()
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	sf, ok := frame.(*http2.SettingsFrame)
-	if !ok {
-		conn.Close()
-		return nil, fmt.Errorf("h2 expected settings frame, got %T", frame)
 	}
 
-	if sf.IsAck() {
-		frame, err = h2s.framer.ReadFrame()
-		if err != nil {
-			conn.Close()
-			return nil, err
-		}
-		sf, ok = frame.(*http2.SettingsFrame)
-		if !ok {
-			conn.Close()
-			return nil, fmt.Errorf("h2 expected settings frame, got %T", frame)
-		}
-	}
-
-	for i := 0; i < sf.NumSettings(); i++ {
-		s := sf.Setting(i)
-		if s.ID == http2.SettingMaxFrameSize {
-			atomic.StoreUint32(&h2s.effectivePeerMaxFrameSize, s.Val)
-		}
-	}
-
-	h2s.writeMu.Lock()
-	if err := h2s.framer.WriteSettingsAck(); err != nil {
-		h2s.writeMu.Unlock()
-		conn.Close()
-		return nil, err
-	}
-	if err := h2s.bw.Flush(); err != nil {
-		h2s.writeMu.Unlock()
-		conn.Close()
-		return nil, err
-	}
-	h2s.writeMu.Unlock()
-
-	go h2s.readLoop()
 	return h2s, nil
 }
 
@@ -169,25 +121,35 @@ func (h *HttpSessionH2) Close() error {
 		if h.agent != nil && h.client.legitAgentGenerator != nil {
 			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
 		}
+
 		h.writeMu.Lock()
-		h.framer.WriteGoAway(atomic.LoadUint32(&h.lastStreamID), http2.ErrCodeNo, nil)
+		h.framer.WriteGoAway(
+			atomic.LoadUint32(&h.lastStreamID),
+			http2.ErrCodeNo,
+			nil,
+		)
 		h.bw.Flush()
 		h.writeMu.Unlock()
+
 		return h.conn.Close()
 	}
 	return nil
 }
 
-func (h *HttpSessionH2) nextStreamID() uint32 {
+func (h *HttpSessionH2) NextStreamID() uint32 {
 	return atomic.AddUint32(&h.lastStreamID, 2)
+}
+
+func (h *HttpSessionH2) CurrentStreamID() uint32 {
+	return atomic.LoadUint32(&h.lastStreamID)
 }
 
 func (h *HttpSessionH2) Fire(_ context.Context, req *HttpRequest) error {
 	if h.connClosed.Load() {
 		return net.ErrClosed
 	}
-	streamID := h.nextStreamID()
-	return h.sendRequestFrames(streamID, req, false)
+	streamID := h.NextStreamID()
+	return h.sendRequestFrames(streamID, req, true)
 }
 
 func (h *HttpSessionH2) Request(ctx context.Context, req *HttpRequest) (*http.Response, error) {
@@ -195,9 +157,13 @@ func (h *HttpSessionH2) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		return nil, net.ErrClosed
 	}
 
+	h.enableReaderLoop.Do(func() {
+		go h.readLoop()
+	})
+
 	stream := h.client.h2StreamPool.Get().(*h2Stream)
 	respChan := make(chan *http.Response, 1)
-	streamID := h.nextStreamID()
+	streamID := h.NextStreamID()
 
 	stream.id = streamID
 	stream.responseChan = respChan
@@ -282,7 +248,12 @@ func (h *HttpSessionH2) sendRequestFrames(streamID uint32, req *HttpRequest, exp
 		endHeaders := sent == len(headerBlock)
 		var err error
 		if sent == len(chunk) {
-			err = h.framer.WriteHeaders(http2.HeadersFrameParam{StreamID: streamID, BlockFragment: chunk, EndStream: endStreamOnHeaders, EndHeaders: endHeaders})
+			err = h.framer.WriteHeaders(http2.HeadersFrameParam{
+				StreamID:      streamID,
+				BlockFragment: chunk,
+				EndStream:     endStreamOnHeaders,
+				EndHeaders:    endHeaders,
+			})
 		} else {
 			err = h.framer.WriteContinuation(streamID, endHeaders, chunk)
 		}
@@ -306,7 +277,9 @@ func (h *HttpSessionH2) sendRequestFrames(streamID uint32, req *HttpRequest, exp
 
 func (h *HttpSessionH2) readLoop() {
 	defer h.Close()
+
 	hpackDecoder := hpack.NewDecoder(4096, nil)
+
 	for {
 		frame, err := h.framer.ReadFrame()
 		if err != nil {
@@ -487,5 +460,12 @@ func (h *HttpSessionH2) UpdateWindow(streamId uint32, windowId uint32) error {
 	h.writeMu.Lock()
 	defer h.writeMu.Unlock()
 	h.framer.WriteWindowUpdate(streamId, windowId)
+	return h.bw.Flush()
+}
+
+func (h *HttpSessionH2) WriteSettings(settings []http2.Setting) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+	h.framer.WriteSettings(settings...)
 	return h.bw.Flush()
 }
