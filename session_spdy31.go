@@ -37,7 +37,7 @@ type HttpSessionSpdy31 struct {
 	bw           *bufio.Writer
 }
 
-func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legitagent.Agent) (HttpSession, error) {
+func newSpdy3Session(client *Client, conn net.Conn, hostname string, host string, agent *legitagent.Agent) (HttpSession, error) {
 	bw := bufio.NewWriter(conn)
 	framer, err := spdy.NewFramer(bw, conn)
 	if err != nil {
@@ -46,7 +46,7 @@ func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legi
 	}
 
 	s3s := &HttpSessionSpdy31{
-		SessionCommon: newSessionCommon(client, hostname, agent),
+		SessionCommon: newSessionCommon(client, hostname, host, agent),
 		conn:          conn,
 		framer:        framer,
 		streams:       make(map[uint32]*spdyStream),

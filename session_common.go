@@ -33,14 +33,16 @@ func (b *byteBufferPoolCloser) Close() error {
 type SessionCommon struct {
 	client   *Client
 	hostname string
+	host     string
 	agent    *legitagent.Agent
 	ipAddr   net.IP
 }
 
-func newSessionCommon(client *Client, hostname string, agent *legitagent.Agent) *SessionCommon {
+func newSessionCommon(client *Client, hostname, host string, agent *legitagent.Agent) *SessionCommon {
 	sc := &SessionCommon{
 		client:   client,
 		hostname: hostname,
+		host:     host,
 		agent:    agent,
 	}
 
@@ -147,7 +149,7 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 			finalHeaders.Set(":scheme", "https")
 		}
 		if finalHeaders.Get(":authority") == "" {
-			finalHeaders.Set(":authority", s.hostname)
+			finalHeaders.Set(":authority", s.host)
 		}
 		if finalHeaders.Get(":path") == "" {
 			finalHeaders.Set(":path", uri)
@@ -159,7 +161,7 @@ func (s *SessionCommon) prepareHeaders(req *HttpRequest, isHttp2 bool) http.Head
 
 	} else {
 		if finalHeaders.Get("Host") == "" {
-			finalHeaders.Set("Host", s.hostname)
+			finalHeaders.Set("Host", s.host)
 		}
 	}
 

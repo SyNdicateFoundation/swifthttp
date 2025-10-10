@@ -30,7 +30,6 @@ var (
 	h3TLSProtos   = []string{http3.NextProtoH3}
 	spdyTLSProtos = []string{"spdy/3.1"}
 )
-
 var globalDnsCache = sync.Map{}
 
 func (hc *Client) lookupIP(hostname string) ([]net.IP, error) {
@@ -63,6 +62,8 @@ func (hc *Client) lookupIP(hostname string) ([]net.IP, error) {
 
 func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, error) {
 	hostname := u.Hostname()
+	host := u.Host
+
 	portStr := u.Port()
 	if portStr == "" {
 		if u.Scheme == "https" {
@@ -88,19 +89,18 @@ func (hc *Client) CreateSession(ctx context.Context, u *url.URL) (HttpSession, e
 	addr := &net.TCPAddr{IP: fastrand.Choice(ips), Port: port}
 	isTLS := u.Scheme == "https" || hc.tls.TLSMode == HttpTlsModeForever
 
-	return hc.createSessionWithAddr(ctx, addr, hostname, isTLS)
+	return hc.createSessionWithAddr(ctx, addr, hostname, host, isTLS)
 }
 
-func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, hostname string, isTLS bool) (HttpSession, error) {
+func (hc *Client) createSessionWithAddr(ctx context.Context, addr *net.TCPAddr, hostname, host string, isTLS bool) (HttpSession, error) {
 	conn, err := hc.dial(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
-
-	return hc.CreateSessionOverConn(ctx, conn, hostname, isTLS)
+	return hc.CreateSessionOverConn(ctx, conn, hostname, host, isTLS)
 }
 
-func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, hostname string, isTLS bool) (HttpSession, error) {
+func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, hostname, host string, isTLS bool) (HttpSession, error) {
 	var agent *legitagent.Agent
 	var err error
 
@@ -117,31 +117,16 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 			return nil, fmt.Errorf("HTTP/3 requires a TLS connection")
 		}
 
+		tlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos)
+
 		addr, ok := conn.RemoteAddr().(*net.UDPAddr)
 		if !ok {
 			hc.releaseAgent(agent)
-			return nil, fmt.Errorf("HTTP/3 requires a TCP address to derive UDP address, but got %T", conn.RemoteAddr())
+			return nil, fmt.Errorf("HTTP/3 session requires a UDP connection, but got %T", conn.RemoteAddr())
 		}
+		tcpAddr := &net.TCPAddr{IP: addr.IP, Port: addr.Port, Zone: addr.Zone}
 
-		tlsConfig := hc.prepareTLSConfig(hostname, h3TLSProtos)
-		uconn := utls.UClient(conn, tlsConfig, hc.getHelloID(agent))
-
-		if agent != nil && agent.ClientHelloSpec != nil {
-			if err := uconn.ApplyPreset(agent.ClientHelloSpec); err != nil {
-				uconn.Close()
-				hc.releaseAgent(agent)
-				return nil, fmt.Errorf("failed to apply utls preset for H3: %w", err)
-			}
-		}
-
-		if err := uconn.HandshakeContext(ctx); err != nil {
-			uconn.Close()
-			hc.releaseAgent(agent)
-			return nil, fmt.Errorf("utls handshake failed for H3: %w", err)
-		}
-
-		conn = uconn
-		session, err := newH3Session(ctx, hc, (*net.TCPAddr)(addr), hostname, agent, tlsConfig)
+		session, err := newH3Session(ctx, hc, tcpAddr, hostname, host, agent, tlsConfig)
 		if err != nil {
 			hc.releaseAgent(agent)
 		}
@@ -150,33 +135,39 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 
 	if isTLS {
 		tlsConfig := hc.prepareTLSConfig(hostname, hc.getTLSProtos())
-		uconn := utls.UClient(conn, tlsConfig, hc.getHelloID(agent))
+		uconn := utls.UClient(conn, tlsConfig, utls.HelloCustom)
 
-		if agent != nil && agent.ClientHelloSpec != nil {
-			if err := uconn.ApplyPreset(agent.ClientHelloSpec); err != nil {
-				uconn.Close()
-				hc.releaseAgent(agent)
-				return nil, fmt.Errorf("failed to apply utls preset: %w", err)
-			}
+		finalSpec, err := hc.prepareFinalSpec(agent, hc.getTLSProtos())
+		if err != nil {
+			uconn.Close()
+			hc.releaseAgent(agent)
+			return nil, err
 		}
+
+		if err := uconn.ApplyPreset(finalSpec); err != nil {
+			uconn.Close()
+			hc.releaseAgent(agent)
+			return nil, fmt.Errorf("failed to apply modified uTLS preset: %w", err)
+		}
+
+		uconn.SetSNI(hostname)
 
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			uconn.Close()
 			hc.releaseAgent(agent)
 			return nil, fmt.Errorf("utls handshake failed: %w", err)
 		}
-
 		conn = uconn
 	}
 
 	var session HttpSession
 	switch hc.httpVersion {
 	case HttpVersion1_1:
-		session, err = newH1Session(hc, conn, hostname, agent)
+		session, err = newH1Session(hc, conn, hostname, host, agent)
 	case HttpVersion2_0:
-		session, err = newH2Session(hc, conn, hostname, agent)
+		session, err = newH2Session(hc, conn, hostname, host, agent)
 	case HttpVersionSPDY31:
-		session, err = newSpdy3Session(hc, conn, hostname, agent)
+		session, err = newSpdy3Session(hc, conn, hostname, host, agent)
 	default:
 		conn.Close()
 		err = fmt.Errorf("unsupported http version for tcp session: %s", hc.httpVersion)
@@ -185,20 +176,44 @@ func (hc *Client) CreateSessionOverConn(ctx context.Context, conn net.Conn, host
 	if err != nil {
 		hc.releaseAgent(agent)
 	}
-
 	return session, err
 }
 
-func (hc *Client) getHelloID(agent *legitagent.Agent) utls.ClientHelloID {
-	if hc.httpVersion == HttpVersionSPDY31 {
-		return utls.HelloGolang
+func (hc *Client) prepareFinalSpec(agent *legitagent.Agent, alpns []string) (*utls.ClientHelloSpec, error) {
+	var finalSpec *utls.ClientHelloSpec
+
+	if agent != nil && agent.ClientHelloSpec != nil {
+		finalSpec = agent.ClientHelloSpec
+	} else {
+		helloID := hc.getHelloID(agent)
+		spec, err := utls.UTLSIdToSpec(helloID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert HelloID to spec: %w", err)
+		}
+		finalSpec = &spec
 	}
 
-	if agent != nil {
-		if agent.ClientHelloSpec != nil {
-			return utls.HelloCustom
+	var alpnExtension *utls.ALPNExtension
+	var foundAlpn bool
+	for _, ext := range finalSpec.Extensions {
+		if alpnExtension, foundAlpn = ext.(*utls.ALPNExtension); foundAlpn {
+			break
 		}
+	}
 
+	if foundAlpn {
+		alpnExtension.AlpnProtocols = alpns
+	} else {
+		finalSpec.Extensions = append(finalSpec.Extensions, &utls.ALPNExtension{
+			AlpnProtocols: alpns,
+		})
+	}
+
+	return finalSpec, nil
+}
+
+func (hc *Client) getHelloID(agent *legitagent.Agent) utls.ClientHelloID {
+	if agent != nil {
 		if agent.ClientHelloID.Client != "" {
 			return agent.ClientHelloID
 		}
@@ -212,9 +227,14 @@ func (hc *Client) getTLSProtos() []string {
 		return h2TLSProtos
 	case HttpVersionSPDY31:
 		return spdyTLSProtos
+	case HttpVersion3_0:
+		return h3TLSProtos
+	case HttpVersion1_1:
+		fallthrough
 	default:
 		return h1TLSProtos
 	}
+
 }
 
 func (hc *Client) releaseAgent(agent *legitagent.Agent) {

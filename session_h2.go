@@ -61,7 +61,7 @@ type HttpSessionH2 struct {
 	bw                        *bufio.Writer
 }
 
-func newH2Session(client *Client, conn net.Conn, hostname string, agent *legitagent.Agent) (HttpSession, error) {
+func newH2Session(client *Client, conn net.Conn, hostname string, host string, agent *legitagent.Agent) (HttpSession, error) {
 	if _, err := conn.Write(preface); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("h2 preface write failed: %w", err)
@@ -70,7 +70,7 @@ func newH2Session(client *Client, conn net.Conn, hostname string, agent *legitag
 	bw := bufio.NewWriter(conn)
 
 	h2s := &HttpSessionH2{
-		SessionCommon:             newSessionCommon(client, hostname, agent),
+		SessionCommon:             newSessionCommon(client, hostname, host, agent),
 		conn:                      conn,
 		framer:                    http2.NewFramer(bw, conn),
 		streams:                   make(map[uint32]*h2Stream),

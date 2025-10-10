@@ -25,8 +25,8 @@ type HttpSessionH1 struct {
 	requestBuf *bytebufferpool.ByteBuffer
 }
 
-func newH1Session(client *Client, conn net.Conn, hostname string, agent *legitagent.Agent) (HttpSession, error) {
-	common := newSessionCommon(client, hostname, agent)
+func newH1Session(client *Client, conn net.Conn, hostname string, host string, agent *legitagent.Agent) (HttpSession, error) {
+	common := newSessionCommon(client, hostname, host, agent)
 	h := &HttpSessionH1{
 		Conn:          conn,
 		SessionCommon: common,

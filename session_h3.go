@@ -24,7 +24,7 @@ type httpSessionH3 struct {
 	connClosed atomic.Bool
 }
 
-func newH3Session(ctx context.Context, client *Client, addr *net.TCPAddr, hostname string, agent *legitagent.Agent, utlsConfig *utls.Config) (HttpSession, error) {
+func newH3Session(ctx context.Context, client *Client, addr *net.TCPAddr, hostname string, host string, agent *legitagent.Agent, utlsConfig *utls.Config) (HttpSession, error) {
 	udpAddr := &net.UDPAddr{IP: addr.IP, Port: addr.Port, Zone: addr.Zone}
 
 	var packetConn net.PacketConn
@@ -65,7 +65,7 @@ func newH3Session(ctx context.Context, client *Client, addr *net.TCPAddr, hostna
 	}
 
 	s := &httpSessionH3{
-		SessionCommon: newSessionCommon(client, hostname, agent),
+		SessionCommon: newSessionCommon(client, hostname, host, agent),
 		quicConn:      quicConn,
 		rt: &http3.RoundTripper{
 			Dial: func(context.Context, string, *utls.Config, *uquic.Config) (uquic.EarlyConnection, error) {
