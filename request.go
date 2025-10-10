@@ -89,7 +89,7 @@ func WithBoundary(value string) RequestOpt {
 	}
 }
 
-func WithCustomPath(s string) RequestOpt {
+func WithPath(s string) RequestOpt {
 	return func(req *HttpRequest) {
 		req.RawPath = s
 	}

@@ -120,7 +120,7 @@ func TestWithBoundary(t *testing.T) {
 
 func TestWithCustomPath(t *testing.T) {
 	path := "/custom/path"
-	req := NewRequest(WithCustomPath(path))
+	req := NewRequest(WithPath(path))
 	if req.RawPath != path {
 		t.Errorf("Expected RawPath %s, got %s", path, req.RawPath)
 	}
@@ -132,7 +132,7 @@ func TestRequestOptionsChaining(t *testing.T) {
 		WithMethod(RequestTypePut),
 		WithBody(body, "app/data"),
 		WithSetHeader("Authorization", "Bearer token"),
-		WithCustomPath("/api/v1/resource"),
+		WithPath("/api/v1/resource"),
 		WithAddHeader("X-Multi", "v1"),
 		WithAddHeader("X-Multi", "v2"),
 	)
