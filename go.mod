@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/SyNdicateFoundation/fastrand v0.0.0-20251009000903-13c8c52be26b
 	github.com/SyNdicateFoundation/legitagent v0.0.0-20251009002824-bb46306c7786
-	github.com/SyNdicateFoundation/singproxy v0.0.0-20251010014741-8577931355ec
+	github.com/SyNdicateFoundation/singproxy v0.0.0-20251010021421-93074c4efed9
 	github.com/refraction-networking/uquic v0.0.6
 	github.com/refraction-networking/utls v1.8.0
 	github.com/shykes/spdy-go v0.0.0-20130118032238-0ee95b1b8e48

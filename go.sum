@@ -4,8 +4,8 @@ github.com/SyNdicateFoundation/fastrand v0.0.0-20251009000903-13c8c52be26b h1:2L
 github.com/SyNdicateFoundation/fastrand v0.0.0-20251009000903-13c8c52be26b/go.mod h1:scoNe8HD8j06MLAOsiy//Lyd4JCGycOhFFhFqz4DKsE=
 github.com/SyNdicateFoundation/legitagent v0.0.0-20251009002824-bb46306c7786 h1:URXZ94kfOTjczGk/h4/EuN1rCmoZDRF+HOhr3aFX8K8=
 github.com/SyNdicateFoundation/legitagent v0.0.0-20251009002824-bb46306c7786/go.mod h1:QGUbXe7PaEtF3dS+ek7+Amr2oxkcc/tmO5+YbBdZ4K4=
-github.com/SyNdicateFoundation/singproxy v0.0.0-20251010014741-8577931355ec h1:CADzonfKcA4METDHX4bDzwIuEmiFKUpUVgtL3jd4kTs=
-github.com/SyNdicateFoundation/singproxy v0.0.0-20251010014741-8577931355ec/go.mod h1:D3SpEioM8xQfLSMXAPqGV2T+QQA8K34MHwj9QO+qlog=
+github.com/SyNdicateFoundation/singproxy v0.0.0-20251010021421-93074c4efed9 h1:Hzr+S+83HJva7ina0KRILB3gkaSmFE4UEJ695K51lVw=
+github.com/SyNdicateFoundation/singproxy v0.0.0-20251010021421-93074c4efed9/go.mod h1:D3SpEioM8xQfLSMXAPqGV2T+QQA8K34MHwj9QO+qlog=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/akutz/memconn v0.1.0 h1:NawI0TORU4hcOMsMr11g7vwlCdkYeLKXBcxWu2W/P8A=
