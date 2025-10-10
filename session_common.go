@@ -83,7 +83,7 @@ func (s *SessionCommon) prepareHeaderOrder(headers http.Header) []string {
 			lower := strings.ToLower(k)
 			if _, ok := headers[lower]; ok {
 				headerOrder = append(headerOrder, k)
-				seen[k] = struct{}{}
+				seen[lower] = struct{}{}
 			}
 		}
 	}
