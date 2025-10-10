@@ -229,6 +229,8 @@ func (hc *Client) prepareTLSConfig(hostname string, alpns []string, hasAgent boo
 		tlsConfig = hc.tls.UTLSConfig.Clone()
 	} else {
 		tlsConfig = &utls.Config{}
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.PreferSkipResumptionOnNilExtension = true
 	}
 
 	if !hasAgent && hc.tls != nil && hc.tls.OptimizedConn {
@@ -237,15 +239,14 @@ func (hc *Client) prepareTLSConfig(hostname string, alpns []string, hasAgent boo
 			utls.TLS_AES_256_GCM_SHA384,
 			utls.TLS_CHACHA20_POLY1305_SHA256,
 		}
+
 		tlsConfig.MinVersion = utls.VersionTLS13
 		tlsConfig.MaxVersion = utls.VersionTLS13
+		tlsConfig.InsecureSkipTimeVerify = true
 	}
 
 	tlsConfig.ServerName = hostname
 	tlsConfig.NextProtos = append([]string(nil), alpns...)
-	tlsConfig.InsecureSkipVerify = true
-	tlsConfig.PreferSkipResumptionOnNilExtension = true
-	tlsConfig.InsecureSkipTimeVerify = true
 
 	return tlsConfig
 }
