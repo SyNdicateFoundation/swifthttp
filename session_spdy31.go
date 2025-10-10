@@ -58,59 +58,59 @@ func newSpdy3Session(client *Client, conn net.Conn, hostname string, agent *legi
 	return s3s, nil
 }
 
-func (s *HttpSessionSpdy31) Close() error {
-	if s.connClosed.CompareAndSwap(false, true) {
-		if s.agent != nil && s.client.legitAgentGenerator != nil {
-			s.client.legitAgentGenerator.ReleaseAgent(s.agent)
+func (h *HttpSessionSpdy31) Close() error {
+	if h.connClosed.CompareAndSwap(false, true) {
+		if h.agent != nil && h.client.legitAgentGenerator != nil {
+			h.client.legitAgentGenerator.ReleaseAgent(h.agent)
 		}
-		s.writeMu.Lock()
-		s.framer.WriteFrame(&spdy.GoAwayFrame{LastGoodStreamId: atomic.LoadUint32(&s.lastStreamID)})
-		s.bw.Flush()
-		s.writeMu.Unlock()
-		return s.conn.Close()
+		h.writeMu.Lock()
+		h.framer.WriteFrame(&spdy.GoAwayFrame{LastGoodStreamId: atomic.LoadUint32(&h.lastStreamID)})
+		h.bw.Flush()
+		h.writeMu.Unlock()
+		return h.conn.Close()
 	}
 	return nil
 }
 
-func (s *HttpSessionSpdy31) nextStreamID() uint32 {
-	return atomic.AddUint32(&s.lastStreamID, 2)
+func (h *HttpSessionSpdy31) nextStreamID() uint32 {
+	return atomic.AddUint32(&h.lastStreamID, 2)
 }
 
-func (s *HttpSessionSpdy31) Fire(ctx context.Context, req *HttpRequest) error {
-	if s.connClosed.Load() {
+func (h *HttpSessionSpdy31) Fire(ctx context.Context, req *HttpRequest) error {
+	if h.connClosed.Load() {
 		return net.ErrClosed
 	}
-	return s.sendRequest(req, 0)
+	return h.sendRequest(req, 0)
 }
 
-func (s *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*http.Response, error) {
-	if s.connClosed.Load() {
+func (h *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*http.Response, error) {
+	if h.connClosed.Load() {
 		return nil, net.ErrClosed
 	}
 
 	respChan := make(chan *http.Response, 1)
-	streamID := s.nextStreamID()
+	streamID := h.nextStreamID()
 
-	s.streamMu.Lock()
-	s.streams[streamID] = &spdyStream{
+	h.streamMu.Lock()
+	h.streams[streamID] = &spdyStream{
 		responseChan: respChan,
 		body:         bytebufferpool.Get(),
 		header:       make(http.Header),
 	}
-	s.streamMu.Unlock()
+	h.streamMu.Unlock()
 
 	defer func() {
-		s.streamMu.Lock()
-		if stream, ok := s.streams[streamID]; ok {
+		h.streamMu.Lock()
+		if stream, ok := h.streams[streamID]; ok {
 			if !stream.streamEnded {
 				bytebufferpool.Put(stream.body)
 			}
 		}
-		delete(s.streams, streamID)
-		s.streamMu.Unlock()
+		delete(h.streams, streamID)
+		h.streamMu.Unlock()
 	}()
 
-	if err := s.sendRequest(req, streamID); err != nil {
+	if err := h.sendRequest(req, streamID); err != nil {
 		return nil, err
 	}
 
@@ -125,17 +125,17 @@ func (s *HttpSessionSpdy31) Request(ctx context.Context, req *HttpRequest) (*htt
 	}
 }
 
-func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error {
+func (h *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error {
 	var finalBody []byte
 	hasBody := len(req.Body) > 0
 	if hasBody {
 		finalBody = req.Body
-		if s.client.randomizer != nil {
-			finalBody = s.client.randomizer.Randomizer(finalBody)
+		if h.client.randomizer != nil {
+			finalBody = h.client.randomizer.Randomizer(finalBody)
 		}
 	}
 
-	headers := s.prepareHeaders(req, false)
+	headers := h.prepareHeaders(req, false)
 	if hasBody {
 		headers.Set("content-length", strconv.Itoa(len(finalBody)))
 	}
@@ -144,20 +144,25 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error
 	if method == "" {
 		method = http.MethodGet
 	}
+
 	uri := req.RawPath
 	if uri == "" {
 		uri = "/"
+	}
+
+	if h.client.randomizer != nil {
+		uri = h.client.randomizer.RandomizerString(uri)
 	}
 
 	spdyHeaders := make(http.Header)
 	for k, v := range headers {
 		keyToWrite := strings.ToLower(k)
 		valuesToWrite := v
-		if s.client.randomizer != nil {
-			keyToWrite = s.client.randomizer.RandomizerString(keyToWrite)
+		if h.client.randomizer != nil {
+			keyToWrite = h.client.randomizer.RandomizerString(keyToWrite)
 			randomizedValues := make([]string, len(v))
 			for i, val := range v {
-				randomizedValues[i] = s.client.randomizer.RandomizerString(val)
+				randomizedValues[i] = h.client.randomizer.RandomizerString(val)
 			}
 			valuesToWrite = randomizedValues
 		}
@@ -169,10 +174,10 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error
 	spdyHeaders.Set("version", "HTTP/1.1")
 	spdyHeaders.Set("scheme", "https")
 	spdyHeaders.Del("host")
-	spdyHeaders.Set("host", s.hostname)
+	spdyHeaders.Set("host", h.hostname)
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
 
 	synStreamFrame := &spdy.SynStreamFrame{
 		StreamId: streamID,
@@ -183,7 +188,7 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error
 		synStreamFrame.CFHeader.Flags = spdy.ControlFlagFin
 	}
 
-	if err := s.framer.WriteFrame(synStreamFrame); err != nil {
+	if err := h.framer.WriteFrame(synStreamFrame); err != nil {
 		return fmt.Errorf("spdy write syn_stream failed: %w", err)
 	}
 
@@ -193,17 +198,17 @@ func (s *HttpSessionSpdy31) sendRequest(req *HttpRequest, streamID uint32) error
 			Data:     finalBody,
 			Flags:    spdy.DataFlagFin,
 		}
-		if err := s.framer.WriteFrame(dataFrame); err != nil {
+		if err := h.framer.WriteFrame(dataFrame); err != nil {
 			return fmt.Errorf("spdy write data failed: %w", err)
 		}
 	}
-	return s.bw.Flush()
+	return h.bw.Flush()
 }
 
-func (s *HttpSessionSpdy31) readLoop() {
-	defer s.Close()
+func (h *HttpSessionSpdy31) readLoop() {
+	defer h.Close()
 	for {
-		frame, err := s.framer.ReadFrame()
+		frame, err := h.framer.ReadFrame()
 		if err != nil {
 			return
 		}
@@ -218,20 +223,20 @@ func (s *HttpSessionSpdy31) readLoop() {
 			streamID = f.StreamId
 			isFin = f.Flags&spdy.DataFlagFin != 0
 		case *spdy.RstStreamFrame:
-			s.streamMu.Lock()
-			if stream, ok := s.streams[f.StreamId]; ok && !stream.streamEnded {
+			h.streamMu.Lock()
+			if stream, ok := h.streams[f.StreamId]; ok && !stream.streamEnded {
 				close(stream.responseChan)
 			}
-			delete(s.streams, f.StreamId)
-			s.streamMu.Unlock()
+			delete(h.streams, f.StreamId)
+			h.streamMu.Unlock()
 			continue
 		default:
 			continue
 		}
 
-		s.streamMu.RLock()
-		stream, ok := s.streams[streamID]
-		s.streamMu.RUnlock()
+		h.streamMu.RLock()
+		stream, ok := h.streams[streamID]
+		h.streamMu.RUnlock()
 		if !ok {
 			continue
 		}
@@ -246,13 +251,13 @@ func (s *HttpSessionSpdy31) readLoop() {
 		}
 
 		if isFin {
-			s.streamMu.Lock()
+			h.streamMu.Lock()
 			if stream.streamEnded {
-				s.streamMu.Unlock()
+				h.streamMu.Unlock()
 				continue
 			}
 			stream.streamEnded = true
-			s.streamMu.Unlock()
+			h.streamMu.Unlock()
 
 			status := stream.header.Get("status")
 			statusCode, _ := strconv.Atoi(strings.Split(status, " ")[0])

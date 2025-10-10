@@ -141,12 +141,16 @@ func (h *httpSessionH3) Request(ctx context.Context, req *HttpRequest) (*http.Re
 		bodyReader = bytes.NewReader(finalBody)
 	}
 
-	path := req.RawPath
-	if path == "" {
-		path = "/"
+	uri := req.RawPath
+	if uri == "" {
+		uri = "/"
 	}
 
-	urlStr := fmt.Sprintf("https://%s%s", h.hostname, path)
+	if h.client.randomizer != nil {
+		uri = h.client.randomizer.RandomizerString(uri)
+	}
+
+	urlStr := fmt.Sprintf("https://%s%s", h.hostname, uri)
 	stdReq, err := http.NewRequestWithContext(ctx, method, urlStr, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standard http.Request: %w", err)
